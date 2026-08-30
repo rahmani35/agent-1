@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent-1 | Document Q&amp;A (RAG) Architecture &amp; System Overview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-base: #090d16;
+      --bg-card: rgba(22, 27, 39, 0.75);
+      --bg-card-hover: rgba(30, 38, 56, 0.85);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(88, 166, 255, 0.3);
+      --text-primary: #f0f6fc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      
+      --accent-blue: #38bdf8;
+      --accent-indigo: #6366f1;
+      --accent-purple: #a855f7;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      
+      --gradient-primary: linear-gradient(135deg, #38bdf8 0%, #6366f1 50%, #a855f7 100%);
+      --gradient-card: linear-gradient(180deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.8) 100%);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      padding: 2.5rem 1.5rem;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.06) 0%, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+    }
+
+    /* Header & Hero */
+    .hero {
+      text-align: center;
+      padding: 3rem 2rem;
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--gradient-primary);
+    }
+
+    .badge-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 1rem;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: var(--accent-blue);
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 1rem;
+    }
+
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-secondary);
+      max-width: 760px;
+      margin: 0 auto 1.75rem;
+    }
+
+    .tech-pills {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.6rem;
+    }
+
+    .tech-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-subtle);
+      padding: 0.35rem 0.85rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .tech-pill dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    /* Section Styles */
+    .section-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .section-title span.icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: rgba(99, 102, 241, 0.15);
+      color: var(--accent-indigo);
+      font-size: 1.1rem;
+    }
+
+    /* Grid Cards */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 1.75rem;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .card:hover {
+      border-color: var(--border-accent);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.6);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .card-header h3 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .cost-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--accent-emerald);
+    }
+
+    /* Visual Architecture Pipeline */
+    .pipeline-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 2rem;
+    }
+
+    .flow-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      position: relative;
+    }
+
+    @media (min-width: 900px) {
+      .flow-steps {
+        flex-direction: row;
+        align-items: stretch;
+      }
+    }
+
+    .flow-step {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      position: relative;
+    }
+
+    .step-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-transform: uppercase;
+    }
+
+    .step-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .step-desc {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      background: var(--bg-card);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th {
+      background: rgba(255, 255, 255, 0.03);
+      padding: 1rem 1.25rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    td {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Code Blocks */
+    pre, code {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    pre {
+      background: #040711;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+
+    .keyword { color: #f43f5e; font-weight: 600; }
+    .string { color: #10b981; }
+    .comment { color: #64748b; font-style: italic; }
+    .func { color: #38bdf8; }
+    .type { color: #a855f7; }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 2rem 0;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border-subtle);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Hero Header -->
+    <header class="hero">
+      <div class="badge-tag">GCP Multi-Vector Architecture</div>
+      <h1>Agent-1: Document Intelligence &amp; RAG</h1>
+      <p>A production-ready Document Q&amp;A system featuring grounded reasoning, smart chunking, and dual vector database support across Google Cloud Platform.</p>
+      
+      <div class="tech-pills">
+        <div class="tech-pill"><dot style="background:#38bdf8"></dot> Google ADK 2.7</div>
+        <div class="tech-pill"><dot style="background:#6366f1"></dot> Gemini 3.6 Flash</div>
+        <div class="tech-pill"><dot style="background:#a855f7"></dot> text-embedding-004 (768-d)</div>
+        <div class="tech-pill"><dot style="background:#10b981"></dot> Cloud SQL pgvector</div>
+        <div class="tech-pill"><dot style="background:#f59e0b"></dot> Firestore Vector Search</div>
+        <div class="tech-pill"><dot style="background:#38bdf8"></dot> FastAPI Gateway</div>
+        <div class="tech-pill"><dot style="background:#f43f5e"></dot> React 19 + Vite</div>
+      </div>
+    </header>
+
+    <!-- Visual End-to-End Pipeline -->
+    <section>
+      <h2 class="section-title">
+        <span class="icon">⚡</span>
+        <span>End-to-End RAG Ingestion &amp; Retrieval Flow</span>
+      </h2>
+      
+      <div class="pipeline-container">
+        <div class="flow-steps">
+          
+          <div class="flow-step">
+            <span class="step-number">Step 01</span>
+            <div class="step-title">Document Ingestion</div>
+            <div class="step-desc">User uploads PDF, Markdown, or TXT. The document loader extracts raw text and applies overlapping window chunking (default: 800 chars, 150 overlap).</div>
+          </div>
+
+          <div class="flow-step">
+            <span class="step-number">Step 02</span>
+            <div class="step-title">Embedding Generation</div>
+            <div class="step-desc">Batch embeddings are generated via <code>text-embedding-004</code> producing 768-dimensional normalized vectors for each chunk.</div>
+          </div>
+
+          <div class="flow-step">
+            <span class="step-number">Step 03</span>
+            <div class="step-title">Dual Vector Store</div>
+            <div class="step-desc">Persisted into either <strong>Cloud SQL (PostgreSQL + pgvector)</strong> with HNSW cosine indexes, or <strong>Cloud Firestore</strong> using native <code>Vector</code> fields.</div>
+          </div>
+
+          <div class="flow-step">
+            <span class="step-number">Step 04</span>
+            <div class="step-title">Grounded Agent QA</div>
+            <div class="step-desc">When a user asks a question, the ADK Agent invokes the <code>search_documents</code> tool to retrieve top-k chunks and synthesizes an answer with citations.</div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Dual Vector Backend Comparison -->
+    <section>
+      <h2 class="section-title">
+        <span class="icon">🗄️</span>
+        <span>Dual Vector Backend Implementations</span>
+      </h2>
+
+      <div class="grid-2">
+        
+        <!-- Cloud SQL Card -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Cloud SQL for PostgreSQL</h3>
+              <div style="font-size:0.8rem; color:var(--text-muted); font-family:'JetBrains Mono';">VECTOR_BACKEND=cloudsql</div>
+            </div>
+            <div class="cost-badge">~$8 – $10 / mo</div>
+          </div>
+
+          <p style="color:var(--text-secondary); font-size:0.9rem;">
+            Relational PostgreSQL database instance running on a cost-effective <code>db-f1-micro</code> tier with native <code>pgvector</code> extension.
+          </p>
+
+          <pre><code><span class="comment">-- Auto-initialized Schema</span>
+<span class="keyword">CREATE EXTENSION IF NOT EXISTS</span> vector;
+
+<span class="keyword">CREATE TABLE</span> document_chunks (
+    id <span class="type">TEXT PRIMARY KEY</span>,
+    doc_id <span class="type">TEXT</span>,
+    filename <span class="type">TEXT</span>,
+    chunk_index <span class="type">INT</span>,
+    content <span class="type">TEXT</span>,
+    metadata <span class="type">JSONB</span>,
+    embedding <span class="type">vector(768)</span>
+);
+
+<span class="keyword">CREATE INDEX ON</span> document_chunks 
+<span class="keyword">USING</span> hnsw (embedding vector_cosine_ops);</code></pre>
+          <ul style="font-size:0.85rem; color:var(--text-secondary); padding-left:1.2rem;">
+            <li>HNSW index for sub-millisecond approximate nearest neighbor search</li>
+            <li>Connects via Cloud SQL Auth Proxy or direct VPC IP</li>
+          </ul>
+        </div>
+
+        <!-- Firestore Card -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Cloud Firestore Vector Search</h3>
+              <div style="font-size:0.8rem; color:var(--text-muted); font-family:'JetBrains Mono';">VECTOR_BACKEND=firestore</div>
+            </div>
+            <div class="cost-badge">Serverless Pay-Per-Op</div>
+          </div>
+
+          <p style="color:var(--text-secondary); font-size:0.9rem;">
+            Fully serverless NoSQL document database utilizing Google Cloud Firestore's native K-Nearest Neighbor (k-NN) vector search.
+          </p>
+
+          <pre><code><span class="comment"># Native Vector Query</span>
+<span class="keyword">from</span> google.cloud.firestore_v1.vector <span class="keyword">import</span> Vector
+<span class="keyword">from</span> google.cloud.firestore_v1.base_vector_query <span class="keyword">import</span> DistanceMeasure
+
+query = coll.<span class="func">find_nearest</span>(
+    vector_field=<span class="string">"embedding"</span>,
+    query_vector=Vector(query_vec),
+    distance_measure=DistanceMeasure.COSINE,
+    limit=top_k
+)</code></pre>
+          <ul style="font-size:0.85rem; color:var(--text-secondary); padding-left:1.2rem;">
+            <li>Zero idle cost when not querying (ideal for prototypes &amp; scaling apps)</li>
+            <li>In-memory cosine ranking fallback if vector index is building</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Monorepo Structure & Modules -->
+    <section>
+      <h2 class="section-title">
+        <span class="icon">📦</span>
+        <span>Monorepo Module Breakdown</span>
+      </h2>
+
+      <div class="grid-3">
+        
+        <div class="card">
+          <h3 style="color:var(--accent-blue)">agent/ (Core Engine)</h3>
+          <ul style="font-size:0.85rem; color:var(--text-secondary); display:flex; flex-direction:column; gap:0.5rem; list-style:none;">
+            <li>📄 <strong>agent.py</strong>: ADK Agent + <code>search_documents</code> tool</li>
+            <li>📄 <strong>vector_store.py</strong>: Abstract store + Cloud SQL &amp; Firestore</li>
+            <li>📄 <strong>embeddings.py</strong>: text-embedding-004 generation</li>
+            <li>📄 <strong>doc_loader.py</strong>: PDF / TXT / Markdown chunker</li>
+            <li>📄 <strong>deploy.py</strong>: Vertex AI Agent Engine deployer</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3 style="color:var(--accent-indigo)">backend/ (Gateway)</h3>
+          <ul style="font-size:0.85rem; color:var(--text-secondary); display:flex; flex-direction:column; gap:0.5rem; list-style:none;">
+            <li>📄 <strong>main.py</strong>: FastAPI REST routes &amp; docs</li>
+            <li>📄 <strong>vector_service.py</strong>: Chunking &amp; embedding pipeline</li>
+            <li>📄 <strong>auth.py</strong>: Google ID token &amp; whitelist guard</li>
+            <li>📄 <strong>engine.py</strong>: Non-blocking stream proxy &amp; fallback</li>
+            <li>📄 <strong>config.py</strong>: Environment configuration</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3 style="color:var(--accent-purple)">frontend/ (React 19 SPA)</h3>
+          <ul style="font-size:0.85rem; color:var(--text-secondary); display:flex; flex-direction:column; gap:0.5rem; list-style:none;">
+            <li>📄 <strong>DocumentUploadView.jsx</strong>: Drag &amp; drop &amp; search sandbox</li>
+            <li>📄 <strong>ChatView.jsx</strong>: Multi-turn chat with source citations</li>
+            <li>📄 <strong>Header.jsx</strong>: Backend badge, health &amp; theme toggle</li>
+            <li>📄 <strong>LoginView.jsx</strong>: Google OAuth login view</li>
+            <li>📄 <strong>api.js</strong>: Typed async client for FastAPI Gateway</li>
+          </ul>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- REST API Endpoints -->
+    <section>
+      <h2 class="section-title">
+        <span class="icon">🔌</span>
+        <span>Gateway REST API Endpoints</span>
+      </h2>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Endpoint</th>
+              <th>Auth Guard</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span style="color:var(--accent-emerald); font-weight:700; font-family:'JetBrains Mono'">POST</span></td>
+              <td><code>/documents/upload</code></td>
+              <td>Google OAuth</td>
+              <td>Uploads PDF/TXT/MD, chunks content, generates embeddings, and saves to active vector store.</td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--accent-blue); font-weight:700; font-family:'JetBrains Mono'">GET</span></td>
+              <td><code>/documents</code></td>
+              <td>Google OAuth</td>
+              <td>Lists all indexed documents with chunk counts and upload timestamps.</td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--accent-rose); font-weight:700; font-family:'JetBrains Mono'">DELETE</span></td>
+              <td><code>/documents/{doc_id}</code></td>
+              <td>Google OAuth</td>
+              <td>Deletes a document and all corresponding vector chunks from the database.</td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--accent-emerald); font-weight:700; font-family:'JetBrains Mono'">POST</span></td>
+              <td><code>/documents/search</code></td>
+              <td>Google OAuth</td>
+              <td>Executes direct vector similarity search and returns scored chunk snippets.</td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--accent-emerald); font-weight:700; font-family:'JetBrains Mono'">POST</span></td>
+              <td><code>/chat</code></td>
+              <td>Google OAuth</td>
+              <td>Executes grounded RAG reasoning turn with automatic source citations.</td>
+            </tr>
+            <tr>
+              <td><span style="color:var(--accent-blue); font-weight:700; font-family:'JetBrains Mono'">GET</span></td>
+              <td><code>/health</code></td>
+              <td>Public</td>
+              <td>Returns status of Gateway, Active Vector Store connection, and Agent Engine.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Developer Commands -->
+    <section>
+      <h2 class="section-title">
+        <span class="icon">🛠️</span>
+        <span>Developer Commands (Makefile)</span>
+      </h2>
+
+      <div class="grid-2">
+        <pre><code><span class="comment"># Local Development</span>
+<span class="keyword">make</span> dev-backend     <span class="comment"># Runs FastAPI Gateway on :8084</span>
+<span class="keyword">make</span> dev-frontend    <span class="comment"># Runs React Vite dev server on :5174</span>
+<span class="keyword">make</span> test-agent       <span class="comment"># Tests RAG agent query locally</span>
+
+<span class="comment"># Database Initialization</span>
+<span class="keyword">make</span> init-cloudsql   <span class="comment"># Initializes PostgreSQL pgvector schema</span></code></pre>
+
+        <pre><code><span class="comment"># Cloud Deployment</span>
+<span class="keyword">make</span> deploy-agent    <span class="comment"># Deploys to Vertex AI Agent Engine</span>
+<span class="keyword">make</span> deploy-backend  <span class="comment"># Deploys Gateway to Google Cloud Run</span>
+<span class="keyword">make</span> deploy-frontend <span class="comment"># Deploys React UI to Firebase Hosting</span>
+<span class="keyword">make</span> build-frontend  <span class="comment"># Compiles production bundle</span></code></pre>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      Agent-1 Architecture Documentation &bull; Google Cloud Platform &bull; Vertex AI &amp; ADK Reasoning Engine
+    </footer>
+
+  </div>
+
+</body>
+</html>
