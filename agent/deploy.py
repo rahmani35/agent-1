@@ -53,32 +53,17 @@ def deploy_to_agent_engine(
     print(f"[*] Deploying to Vertex AI Agent Engine (display_name='{display_name}')...")
     print("    This may take a few minutes while the container and environment are provisioned.")
 
-    # Create a source distribution tarball for the agent package
-    import tarfile
+    # Prepare agent package directory for Vertex AI extra_packages
+    import shutil
     import tempfile
 
     temp_dir = tempfile.mkdtemp()
-    tar_path = os.path.join(temp_dir, "agent-1.0.0.tar.gz")
-
-    with tarfile.open(tar_path, "w:gz") as tar:
-        # Add setup.py
-        setup_content = """from setuptools import setup, find_packages
-setup(
-    name="agent",
-    version="1.0.0",
-    packages=find_packages(),
-)
-"""
-        setup_info = tarfile.TarInfo(name="setup.py")
-        setup_bytes = setup_content.encode("utf-8")
-        setup_info.size = len(setup_bytes)
-        tar.addfile(setup_info, io.BytesIO(setup_bytes))
-
-        # Add agent package files
-        for py_file in ["__init__.py", "agent.py", "vector_store.py", "embeddings.py", "doc_loader.py"]:
-            file_path = agent_dir / py_file
-            if file_path.exists():
-                tar.add(str(file_path), arcname=f"agent/{py_file}")
+    agent_pkg_dir = os.path.join(temp_dir, "agent")
+    shutil.copytree(
+        str(agent_dir),
+        agent_pkg_dir,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".venv", "*.egg-info"),
+    )
 
     remote_agent = agent_engines.create(
         adk_app,
@@ -95,8 +80,9 @@ setup(
             "cloudpickle>=3.0.0",
             "pydantic>=2.7.0",
             "python-dotenv>=1.0.0",
+            "requests>=2.31.0",
         ],
-        extra_packages=[tar_path],
+        extra_packages=[agent_pkg_dir],
     )
 
     print("\n[✓] Successfully deployed RAG agent to Vertex AI Agent Engine!")
