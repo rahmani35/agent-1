@@ -4,6 +4,7 @@ Deploys the RAG Document Agent to Google Cloud Vertex AI Agent Engine.
 """
 
 import argparse
+import io
 import os
 import sys
 from pathlib import Path
@@ -52,10 +53,32 @@ def deploy_to_agent_engine(
     print(f"[*] Deploying to Vertex AI Agent Engine (display_name='{display_name}')...")
     print("    This may take a few minutes while the container and environment are provisioned.")
 
-    agent_py_path = str(agent_dir / "agent.py")
-    vector_store_py_path = str(agent_dir / "vector_store.py")
-    embeddings_py_path = str(agent_dir / "embeddings.py")
-    doc_loader_py_path = str(agent_dir / "doc_loader.py")
+    # Create a source distribution tarball for the agent package
+    import tarfile
+    import tempfile
+
+    temp_dir = tempfile.mkdtemp()
+    tar_path = os.path.join(temp_dir, "agent-1.0.0.tar.gz")
+
+    with tarfile.open(tar_path, "w:gz") as tar:
+        # Add setup.py
+        setup_content = """from setuptools import setup, find_packages
+setup(
+    name="agent",
+    version="1.0.0",
+    packages=find_packages(),
+)
+"""
+        setup_info = tarfile.TarInfo(name="setup.py")
+        setup_bytes = setup_content.encode("utf-8")
+        setup_info.size = len(setup_bytes)
+        tar.addfile(setup_info, io.BytesIO(setup_bytes))
+
+        # Add agent package files
+        for py_file in ["__init__.py", "agent.py", "vector_store.py", "embeddings.py", "doc_loader.py"]:
+            file_path = agent_dir / py_file
+            if file_path.exists():
+                tar.add(str(file_path), arcname=f"agent/{py_file}")
 
     remote_agent = agent_engines.create(
         adk_app,
@@ -73,12 +96,7 @@ def deploy_to_agent_engine(
             "pydantic>=2.7.0",
             "python-dotenv>=1.0.0",
         ],
-        extra_packages=[
-            agent_py_path,
-            vector_store_py_path,
-            embeddings_py_path,
-            doc_loader_py_path,
-        ],
+        extra_packages=[tar_path],
     )
 
     print("\n[✓] Successfully deployed RAG agent to Vertex AI Agent Engine!")

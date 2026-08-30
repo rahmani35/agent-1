@@ -9,7 +9,13 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
-from .doc_loader import DocumentChunk
+try:
+    from .doc_loader import DocumentChunk
+except (ImportError, ValueError):
+    try:
+        from agent.doc_loader import DocumentChunk
+    except (ImportError, ValueError):
+        from doc_loader import DocumentChunk
 
 load_dotenv()
 

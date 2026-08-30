@@ -43,8 +43,12 @@ def search_documents(query: str, top_k: int = 4) -> str:
     Returns:
         A formatted string of relevant document chunks with metadata and source citations.
     """
-    from agent.embeddings import get_embedding
-    from agent.vector_store import get_vector_store
+    try:
+        from agent.embeddings import get_embedding
+        from agent.vector_store import get_vector_store
+    except (ImportError, ValueError):
+        from embeddings import get_embedding
+        from vector_store import get_vector_store
 
     try:
         query_emb = get_embedding(query)
