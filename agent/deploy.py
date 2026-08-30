@@ -19,17 +19,18 @@ sys.path.insert(0, str(root_dir))
 load_dotenv(root_dir / ".env")
 
 
-def _runtime_env_vars(project_id: str, location: str) -> dict:
+def _runtime_env_vars() -> dict:
     """Collect the env vars the agent needs at runtime inside the Agent Engine container.
 
     The container has no `.env` file, so any configuration the agent reads via
     os.getenv() (model, API key, vector backend settings) must be shipped
     explicitly with the deployment.
+
+    GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are deliberately absent:
+    Agent Engine injects them and rejects the deployment with
+    "Environment variable name '...' is reserved" if they are set here.
     """
-    env_vars = {
-        "GOOGLE_CLOUD_PROJECT": project_id,
-        "GOOGLE_CLOUD_REGION": location,
-    }
+    env_vars = {}
 
     passthrough = [
         "GEMINI_API_KEY",
@@ -132,7 +133,7 @@ def deploy_to_agent_engine(
                 "requests>=2.31.0",
             ],
             extra_packages=["agent"],
-            env_vars=_runtime_env_vars(project_id, location),
+            env_vars=_runtime_env_vars(),
         )
     finally:
         os.chdir(previous_cwd)
