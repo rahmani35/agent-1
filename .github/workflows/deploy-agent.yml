@@ -53,3 +53,8 @@ jobs:
             --name rag-document-agent
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODEL_NAME: gemini-3.6-flash
+          EMBEDDING_MODEL: gemini-embedding-001
+          VECTOR_BACKEND: firestore
+          FIRESTORE_COLLECTION: document_chunks
+          FIRESTORE_DATABASE: "(default)"

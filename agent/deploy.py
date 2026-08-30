@@ -4,7 +4,6 @@ Deploys the RAG Document Agent to Google Cloud Vertex AI Agent Engine.
 """
 
 import argparse
-import io
 import os
 import sys
 from pathlib import Path
@@ -18,6 +17,46 @@ sys.path.insert(0, str(root_dir))
 
 # Load root .env
 load_dotenv(root_dir / ".env")
+
+
+def _runtime_env_vars(project_id: str, location: str) -> dict:
+    """Collect the env vars the agent needs at runtime inside the Agent Engine container.
+
+    The container has no `.env` file, so any configuration the agent reads via
+    os.getenv() (model, API key, vector backend settings) must be shipped
+    explicitly with the deployment.
+    """
+    env_vars = {
+        "GOOGLE_CLOUD_PROJECT": project_id,
+        "GOOGLE_CLOUD_REGION": location,
+    }
+
+    passthrough = [
+        "GEMINI_API_KEY",
+        "MODEL_NAME",
+        "EMBEDDING_MODEL",
+        "VECTOR_BACKEND",
+        "FIRESTORE_COLLECTION",
+        "FIRESTORE_DATABASE",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASS",
+        "DB_SSLMODE",
+        "CLOUD_SQL_CONNECTION_NAME",
+    ]
+    for key in passthrough:
+        value = os.getenv(key)
+        if value:
+            env_vars[key] = value
+
+    missing = [k for k in ("GEMINI_API_KEY", "VECTOR_BACKEND") if k not in env_vars]
+    if missing:
+        print(f"[!] Warning: {', '.join(missing)} not set; the deployed agent will fall back to defaults.")
+
+    print(f"[*] Passing {len(env_vars)} env var(s) to the Agent Engine runtime: {', '.join(sorted(env_vars))}")
+    return env_vars
 
 
 def deploy_to_agent_engine(
@@ -53,65 +92,51 @@ def deploy_to_agent_engine(
     print(f"[*] Deploying to Vertex AI Agent Engine (display_name='{display_name}')...")
     print("    This may take a few minutes while the container and environment are provisioned.")
 
-    # Build a standard Python wheel (.whl) for the agent package
-    # This guarantees pip install into container site-packages on Vertex AI
-    import glob
+    # Stage a clean copy of the `agent` package for extra_packages.
+    #
+    # The SDK archives extra_packages with `tarfile.add(path)`, which keeps the
+    # given path as the archive member name. An absolute path therefore lands in
+    # the container as `var/folders/.../agent` instead of `agent/` at the root of
+    # the working directory, and unpickling the agent fails with
+    # "No module named 'agent'". Paths must be RELATIVE to the current working
+    # directory, so stage the package in a temp dir and run create() from there.
     import shutil
-    import subprocess
     import tempfile
 
-    temp_dir = tempfile.mkdtemp()
-    pkg_source_dir = os.path.join(temp_dir, "pkg_source")
-    os.makedirs(pkg_source_dir, exist_ok=True)
-
-    pyproject_content = """[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "agent"
-version = "1.0.0"
-dependencies = []
-"""
-    with open(os.path.join(pkg_source_dir, "pyproject.toml"), "w") as f:
-        f.write(pyproject_content)
-
+    staging_dir = tempfile.mkdtemp()
     shutil.copytree(
         str(agent_dir),
-        os.path.join(pkg_source_dir, "agent"),
+        os.path.join(staging_dir, "agent"),
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".venv", "*.egg-info"),
     )
+    print(f"[*] Staged agent package for upload: {staging_dir}/agent")
 
-    wheel_build_dir = os.path.join(temp_dir, "dist")
-    os.makedirs(wheel_build_dir, exist_ok=True)
-    build_cmd = [sys.executable, "-m", "pip", "wheel", "--no-deps", "-w", wheel_build_dir, pkg_source_dir]
-    subprocess.run(build_cmd, check=True, capture_output=True)
-
-    wheels = glob.glob(os.path.join(wheel_build_dir, "*.whl"))
-    if not wheels:
-        raise RuntimeError("Failed to build agent wheel package for deployment.")
-    wheel_path = wheels[0]
-    print(f"[*] Built agent wheel package: {os.path.basename(wheel_path)}")
-
-    remote_agent = agent_engines.create(
-        adk_app,
-        display_name=display_name,
-        description=description,
-        requirements=[
-            "google-adk>=2.0.0",
-            "google-cloud-aiplatform>=1.70.0",
-            "google-genai>=0.1.0",
-            "google-cloud-firestore>=2.16.0",
-            "pgvector>=0.3.0",
-            "psycopg[binary]>=3.1.18",
-            "pypdf>=4.2.0",
-            "cloudpickle>=3.0.0",
-            "pydantic>=2.7.0",
-            "python-dotenv>=1.0.0",
-            "requests>=2.31.0",
-        ],
-        extra_packages=[wheel_path],
-    )
+    previous_cwd = os.getcwd()
+    os.chdir(staging_dir)
+    try:
+        remote_agent = agent_engines.create(
+            adk_app,
+            display_name=display_name,
+            description=description,
+            requirements=[
+                "google-adk>=2.0.0",
+                "google-cloud-aiplatform>=1.70.0",
+                "google-genai>=0.1.0",
+                "google-cloud-firestore>=2.16.0",
+                "pgvector>=0.3.0",
+                "psycopg[binary]>=3.1.18",
+                "pypdf>=4.2.0",
+                "cloudpickle>=3.0.0",
+                "pydantic>=2.7.0",
+                "python-dotenv>=1.0.0",
+                "requests>=2.31.0",
+            ],
+            extra_packages=["agent"],
+            env_vars=_runtime_env_vars(project_id, location),
+        )
+    finally:
+        os.chdir(previous_cwd)
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
     print("\n[✓] Successfully deployed RAG agent to Vertex AI Agent Engine!")
     print(f"    Resource Name : {remote_agent.resource_name}")
