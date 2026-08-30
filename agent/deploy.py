@@ -53,17 +53,45 @@ def deploy_to_agent_engine(
     print(f"[*] Deploying to Vertex AI Agent Engine (display_name='{display_name}')...")
     print("    This may take a few minutes while the container and environment are provisioned.")
 
-    # Prepare agent package directory for Vertex AI extra_packages
+    # Build a standard Python wheel (.whl) for the agent package
+    # This guarantees pip install into container site-packages on Vertex AI
+    import glob
     import shutil
+    import subprocess
     import tempfile
 
     temp_dir = tempfile.mkdtemp()
-    agent_pkg_dir = os.path.join(temp_dir, "agent")
+    pkg_source_dir = os.path.join(temp_dir, "pkg_source")
+    os.makedirs(pkg_source_dir, exist_ok=True)
+
+    pyproject_content = """[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent"
+version = "1.0.0"
+dependencies = []
+"""
+    with open(os.path.join(pkg_source_dir, "pyproject.toml"), "w") as f:
+        f.write(pyproject_content)
+
     shutil.copytree(
         str(agent_dir),
-        agent_pkg_dir,
+        os.path.join(pkg_source_dir, "agent"),
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".venv", "*.egg-info"),
     )
+
+    wheel_build_dir = os.path.join(temp_dir, "dist")
+    os.makedirs(wheel_build_dir, exist_ok=True)
+    build_cmd = [sys.executable, "-m", "pip", "wheel", "--no-deps", "-w", wheel_build_dir, pkg_source_dir]
+    subprocess.run(build_cmd, check=True, capture_output=True)
+
+    wheels = glob.glob(os.path.join(wheel_build_dir, "*.whl"))
+    if not wheels:
+        raise RuntimeError("Failed to build agent wheel package for deployment.")
+    wheel_path = wheels[0]
+    print(f"[*] Built agent wheel package: {os.path.basename(wheel_path)}")
 
     remote_agent = agent_engines.create(
         adk_app,
@@ -82,7 +110,7 @@ def deploy_to_agent_engine(
             "python-dotenv>=1.0.0",
             "requests>=2.31.0",
         ],
-        extra_packages=[agent_pkg_dir],
+        extra_packages=[wheel_path],
     )
 
     print("\n[✓] Successfully deployed RAG agent to Vertex AI Agent Engine!")
