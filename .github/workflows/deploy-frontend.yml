@@ -33,8 +33,8 @@ jobs:
         working-directory: frontend
         run: npm run build
         env:
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID || '537728611405-cgtolhfqij6fj514dbkjfv8atiqr4f6b.apps.googleusercontent.com' }}
-          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://agent1-backend-537728611405.europe-west3.run.app' }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID || secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
