@@ -180,6 +180,8 @@ export default function DocumentUploadView({ activeBackend }) {
               </label>
               <input
                 type="number"
+                min={100}
+                max={4000}
                 value={chunkSize}
                 onChange={(e) => setChunkSize(Number(e.target.value))}
                 className="chat-input"
@@ -192,6 +194,8 @@ export default function DocumentUploadView({ activeBackend }) {
               </label>
               <input
                 type="number"
+                min={0}
+                max={Math.max(0, chunkSize - 1)}
                 value={chunkOverlap}
                 onChange={(e) => setChunkOverlap(Number(e.target.value))}
                 className="chat-input"

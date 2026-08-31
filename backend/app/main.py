@@ -16,8 +16,14 @@ from fastapi import (
     Header,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from agent.doc_loader import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    MAX_CHUNK_SIZE,
+    MIN_CHUNK_SIZE,
+)
 from .config import PORT, REASONING_ENGINE_ID, get_active_backend, set_active_backend
 from .auth import (
     GoogleAuthRequest,
@@ -58,6 +64,44 @@ app.add_middleware(
 )
 
 
+OVERLAP_TOO_LARGE = "chunk_overlap must be smaller than chunk_size."
+
+
+class ChunkingParams:
+    """Validated chunking query parameters.
+
+    Bounds are enforced here rather than left to the chunker: an overlap at or
+    above the chunk size, or a non-positive chunk size, produces degenerate
+    chunking, and a caller that asks for it should be told rather than silently
+    given something else.
+    """
+
+    def __init__(
+        self,
+        chunk_size: int = Query(
+            default=DEFAULT_CHUNK_SIZE,
+            ge=MIN_CHUNK_SIZE,
+            le=MAX_CHUNK_SIZE,
+            description="Max character length per chunk",
+        ),
+        chunk_overlap: int = Query(
+            default=DEFAULT_CHUNK_OVERLAP,
+            ge=0,
+            lt=MAX_CHUNK_SIZE,
+            description="Characters repeated from the previous chunk",
+        ),
+    ):
+        if chunk_overlap >= chunk_size:
+            # Literal 422: the Starlette constant for it was renamed and the old
+            # name now warns on every rejected request.
+            raise HTTPException(
+                status_code=422,
+                detail=f"{OVERLAP_TOO_LARGE} Got chunk_overlap={chunk_overlap}, chunk_size={chunk_size}.",
+            )
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+
+
 # Request & Response Models
 class BackendSwitchRequest(BaseModel):
     backend: str = Field(..., description="Target vector backend: 'firestore' or 'cloudsql'")
@@ -67,8 +111,14 @@ class DriveSyncRequest(BaseModel):
     folder_id: str = Field(..., description="Google Drive Folder ID to vectorize")
     folder_name: Optional[str] = Field(default=None, description="Optional human-readable folder name")
     drive_token: Optional[str] = Field(default=None, description="Optional user OAuth access token for Google Drive")
-    chunk_size: int = Field(default=800)
-    chunk_overlap: int = Field(default=150)
+    chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE, ge=MIN_CHUNK_SIZE, le=MAX_CHUNK_SIZE)
+    chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP, ge=0, lt=MAX_CHUNK_SIZE)
+
+    @model_validator(mode="after")
+    def _overlap_below_size(self) -> "DriveSyncRequest":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError(OVERLAP_TOO_LARGE)
+        return self
 
 
 class ChatRequest(BaseModel):
@@ -217,8 +267,7 @@ async def root():
 @app.post("/documents/upload", tags=["Documents"])
 async def upload_document(
     file: UploadFile = File(...),
-    chunk_size: int = Query(default=800, description="Max character length per chunk"),
-    chunk_overlap: int = Query(default=150, description="Overlap between consecutive chunks"),
+    chunking: ChunkingParams = Depends(),
     current_user: UserProfile = Depends(get_current_user),
 ):
     """Upload a document (PDF, TXT, MD), chunk it, generate embeddings, and store in vector DB."""
@@ -231,8 +280,8 @@ async def upload_document(
             file_bytes=file_bytes,
             filename=file.filename or "uploaded_doc",
             content_type=file.content_type or "text/plain",
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+            chunk_size=chunking.chunk_size,
+            chunk_overlap=chunking.chunk_overlap,
         )
         return {
             "message": "Document successfully indexed.",

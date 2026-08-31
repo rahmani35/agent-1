@@ -9,6 +9,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 
+DEFAULT_CHUNK_SIZE = 800
+DEFAULT_CHUNK_OVERLAP = 150
+
+# Bounds callers should validate against before reaching the chunker. The upper
+# bound keeps the worst case (chunk_size + chunk_overlap, since the overlap sits
+# on top of the size) inside the embedding model's input window.
+MIN_CHUNK_SIZE = 100
+MAX_CHUNK_SIZE = 4000
+
 
 @dataclass
 class DocumentChunk:
@@ -79,8 +88,8 @@ def chunk_text(
     text: str,
     doc_id: str,
     filename: str,
-    chunk_size: int = 800,
-    chunk_overlap: int = 150,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     base_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[DocumentChunk]:
     """Split a continuous text string into overlapping chunks.
@@ -137,8 +146,8 @@ def load_pdf_file(
     file_bytes: bytes,
     filename: str,
     doc_id: Optional[str] = None,
-    chunk_size: int = 800,
-    chunk_overlap: int = 150,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> List[DocumentChunk]:
     """Extract text from a PDF file using pypdf and split into chunks."""
     from pypdf import PdfReader
@@ -174,8 +183,8 @@ def load_text_file(
     text_content: str,
     filename: str,
     doc_id: Optional[str] = None,
-    chunk_size: int = 800,
-    chunk_overlap: int = 150,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> List[DocumentChunk]:
     """Process a plain text or markdown file content into chunks."""
     assigned_doc_id = doc_id or str(uuid.uuid4())
