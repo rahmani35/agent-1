@@ -45,7 +45,12 @@ class VectorStore(ABC):
 
     @abstractmethod
     def list_documents(self) -> List[Dict[str, Any]]:
-        """List all unique documents and their chunk counts."""
+        """List all unique documents, their chunk counts, and their provenance.
+
+        Each entry carries `folder_id` and `source` (None for documents that
+        were uploaded directly), so callers can tell which Google Drive folder a
+        document came from without reading every chunk.
+        """
         pass
 
     @abstractmethod
@@ -244,7 +249,9 @@ class CloudSqlPgVectorStore(VectorStore):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT doc_id, filename, COUNT(*) as chunk_count, MAX(created_at) as uploaded_at
+                    SELECT doc_id, filename, COUNT(*) as chunk_count, MAX(created_at) as uploaded_at,
+                           MAX(metadata->>'folder_id') as folder_id,
+                           MAX(metadata->>'source') as source
                     FROM document_chunks
                     GROUP BY doc_id, filename
                     ORDER BY uploaded_at DESC;
@@ -257,6 +264,8 @@ class CloudSqlPgVectorStore(VectorStore):
                         "filename": row[1],
                         "chunk_count": int(row[2]),
                         "uploaded_at": str(row[3]),
+                        "folder_id": row[4],
+                        "source": row[5],
                     })
                 return docs
         finally:
@@ -443,7 +452,11 @@ class FirestoreVectorStore(VectorStore):
 
     def list_documents(self) -> List[Dict[str, Any]]:
         db = self._get_client()
-        docs = db.collection(self.collection_name).select(["doc_id", "filename", "created_at"]).stream()
+        docs = (
+            db.collection(self.collection_name)
+            .select(["doc_id", "filename", "created_at", "metadata.folder_id", "metadata.source"])
+            .stream()
+        )
 
         doc_map: Dict[str, Dict[str, Any]] = {}
         for d in docs:
@@ -452,11 +465,14 @@ class FirestoreVectorStore(VectorStore):
             if not doc_id:
                 continue
             if doc_id not in doc_map:
+                meta = data.get("metadata") or {}
                 doc_map[doc_id] = {
                     "doc_id": doc_id,
                     "filename": data.get("filename", "untitled"),
                     "chunk_count": 0,
                     "uploaded_at": str(data.get("created_at", "")),
+                    "folder_id": meta.get("folder_id"),
+                    "source": meta.get("source"),
                 }
             doc_map[doc_id]["chunk_count"] += 1
 

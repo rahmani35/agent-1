@@ -17,6 +17,9 @@ from .vector_service import VectorService
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
+# Prefix identifying documents in the vector store that originate from Drive.
+DRIVE_DOC_ID_PREFIX = "gdrive_"
+
 SUPPORTED_MIME_TYPES = {
     "application/pdf": "pdf",
     "application/vnd.google-apps.document": "gdoc",
@@ -145,18 +148,28 @@ class GoogleDriveService:
         v_service = vector_service or VectorService()
         store = v_service._get_store()
 
-        # Step 1: List all active files in the folder
+        # Step 1: List all active files in the folder.
+        # Paginate fully: step 3 deletes anything absent from this list, so a
+        # truncated listing would purge files that still exist in Drive.
         q = f"'{folder_id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
-        results = (
-            drive.files()
-            .list(
-                q=q,
-                pageSize=200,
-                fields="files(id, name, mimeType, modifiedTime, webViewLink)",
+        active_drive_files: List[Dict[str, Any]] = []
+        page_token = None
+        while True:
+            results = (
+                drive.files()
+                .list(
+                    q=q,
+                    pageSize=200,
+                    fields="nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)",
+                    pageToken=page_token,
+                )
+                .execute()
             )
-            .execute()
-        )
-        active_drive_files = results.get("files", [])
+            active_drive_files.extend(results.get("files", []))
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
+
         active_file_map = {f["id"]: f for f in active_drive_files}
 
         added_docs = []
@@ -169,7 +182,7 @@ class GoogleDriveService:
             f_name = f.get("name", "unnamed_file")
             f_mime = f.get("mimeType", "")
             f_url = f.get("webViewLink", "")
-            doc_id = f"gdrive_{f_id}"
+            doc_id = f"{DRIVE_DOC_ID_PREFIX}{f_id}"
 
             # Only process supported formats
             if f_mime not in SUPPORTED_MIME_TYPES and not f_name.endswith((".pdf", ".md", ".txt", ".csv")):
@@ -219,19 +232,28 @@ class GoogleDriveService:
             except Exception as err:
                 print(f"[!] Error vectorizing Drive file '{f_name}' ({f_id}): {err}")
 
-        # Step 3: Purge removed / deleted files from Vector Store
+        # Step 3: Purge files that were removed from THIS Drive folder.
+        #
+        # Scoped to folder_id on purpose: the store holds documents from every
+        # folder ever synced, so an unscoped purge would delete other folders'
+        # documents on every sync. Documents whose folder_id is unknown (direct
+        # uploads, or chunks written before folder_id was recorded) are left
+        # alone rather than guessed at.
         existing_docs = store.list_documents()
         removed_docs = []
 
         for doc in existing_docs:
             d_id = doc.get("doc_id", "")
-            # Check if this document belongs to Google Drive and this specific folder
-            if d_id.startswith("gdrive_"):
-                raw_drive_id = d_id.replace("gdrive_", "")
-                if raw_drive_id not in active_file_map:
-                    # File was deleted or moved out of the Google Drive folder!
-                    store.delete_document(d_id)
-                    removed_docs.append({"doc_id": d_id, "filename": doc.get("filename", "")})
+            if not d_id.startswith(DRIVE_DOC_ID_PREFIX):
+                continue
+            if doc.get("folder_id") != folder_id:
+                continue
+
+            raw_drive_id = d_id[len(DRIVE_DOC_ID_PREFIX):]
+            if raw_drive_id not in active_file_map:
+                # File was deleted, trashed, or moved out of this folder.
+                store.delete_document(d_id)
+                removed_docs.append({"doc_id": d_id, "filename": doc.get("filename", "")})
 
         return {
             "status": "synchronized",
