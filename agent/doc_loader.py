@@ -21,6 +21,60 @@ class DocumentChunk:
     embedding: Optional[List[float]] = None
 
 
+def _overlap_tail(text: str, overlap: int) -> str:
+    """Return the last `overlap` characters of `text`, snapped to a word boundary.
+
+    Used to repeat the end of one chunk at the start of the next so a fact split
+    across a chunk boundary stays retrievable from at least one whole chunk.
+    """
+    if overlap <= 0 or not text:
+        return ""
+    if len(text) <= overlap:
+        return text.strip()
+
+    tail = text[-overlap:]
+    # Drop a leading partial word so the overlap starts cleanly.
+    boundary = re.search(r"\s", tail)
+    if boundary:
+        tail = tail[boundary.end():]
+    return tail.strip()
+
+
+def _pack_paragraphs(paragraphs: List[str], chunk_size: int) -> List[str]:
+    """Group paragraphs into disjoint pieces of at most `chunk_size` characters.
+
+    Paragraphs longer than `chunk_size` are hard-sliced. The pieces returned do
+    not overlap; `chunk_text` layers the overlap on afterwards.
+    """
+    groups: List[str] = []
+    current = ""
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        candidate = f"{current}\n\n{para}" if current else para
+        if len(candidate) <= chunk_size:
+            current = candidate
+            continue
+
+        if current:
+            groups.append(current)
+            current = ""
+
+        if len(para) > chunk_size:
+            for start in range(0, len(para), chunk_size):
+                groups.append(para[start : start + chunk_size])
+        else:
+            current = para
+
+    if current:
+        groups.append(current)
+
+    return groups
+
+
 def chunk_text(
     text: str,
     doc_id: str,
@@ -29,40 +83,34 @@ def chunk_text(
     chunk_overlap: int = 150,
     base_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[DocumentChunk]:
-    """Split a continuous text string into overlapping chunks."""
+    """Split a continuous text string into overlapping chunks.
+
+    Text is packed into pieces of at most `chunk_size` characters on paragraph
+    boundaries where possible, then each piece after the first is prefixed with
+    the trailing `chunk_overlap` characters of the piece before it. Every pair of
+    consecutive chunks therefore shares context, whether the split fell on a
+    paragraph boundary or inside an oversized paragraph.
+
+    A chunk can reach `chunk_size + chunk_overlap` characters as a result: the
+    size bound applies to new content, and the repeated overlap sits on top.
+    """
     base_meta = base_metadata or {}
     # Normalize whitespace
     clean_text = re.sub(r"\r\n|\r", "\n", text).strip()
     if not clean_text:
         return []
 
-    # Paragraph-based or fixed-length chunking
-    paragraphs = clean_text.split("\n\n")
+    # Keep the parameters in a range where overlap is meaningful: an overlap at
+    # or above chunk_size would repeat a whole piece into the next one.
+    chunk_size = max(1, chunk_size)
+    overlap = max(0, min(chunk_overlap, chunk_size - 1))
+
+    groups = _pack_paragraphs(clean_text.split("\n\n"), chunk_size)
+
     chunks_text: List[str] = []
-    current_chunk = ""
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-        if len(current_chunk) + len(para) + 2 <= chunk_size:
-            current_chunk = f"{current_chunk}\n\n{para}".strip()
-        else:
-            if current_chunk:
-                chunks_text.append(current_chunk)
-            # If a single paragraph is longer than chunk_size, split by sentences or hard slice
-            if len(para) > chunk_size:
-                start = 0
-                while start < len(para):
-                    end = min(start + chunk_size, len(para))
-                    chunks_text.append(para[start:end])
-                    start += chunk_size - chunk_overlap
-                current_chunk = ""
-            else:
-                current_chunk = para
-
-    if current_chunk:
-        chunks_text.append(current_chunk)
+    for idx, group in enumerate(groups):
+        tail = _overlap_tail(groups[idx - 1], overlap) if idx > 0 else ""
+        chunks_text.append(f"{tail} {group}" if tail else group)
 
     chunks: List[DocumentChunk] = []
     for idx, c_text in enumerate(chunks_text):
