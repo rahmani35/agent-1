@@ -32,8 +32,11 @@ def _runtime_env_vars() -> dict:
     """
     env_vars = {}
 
+    # GEMINI_API_KEY is deliberately absent. Setting it makes agent.py promote it
+    # to GOOGLE_API_KEY, which switches google-genai to API-key auth for every
+    # call - including the Agent Engine session service, which then fails with
+    # "API_KEY_SERVICE_BLOCKED". The container has a service account; let it use it.
     passthrough = [
-        "GEMINI_API_KEY",
         "MODEL_NAME",
         "EMBEDDING_MODEL",
         "VECTOR_BACKEND",
@@ -52,12 +55,28 @@ def _runtime_env_vars() -> dict:
         if value:
             env_vars[key] = value
 
-    missing = [k for k in ("GEMINI_API_KEY", "VECTOR_BACKEND") if k not in env_vars]
+    missing = [k for k in ("VECTOR_BACKEND",) if k not in env_vars]
     if missing:
         print(f"[!] Warning: {', '.join(missing)} not set; the deployed agent will fall back to defaults.")
+    if env_vars.get("VECTOR_BACKEND") in ("cloudsql", "postgres", "pgvector") and not env_vars.get("DB_HOST"):
+        print("[!] Warning: VECTOR_BACKEND is cloudsql but no DB_HOST was provided; retrieval will fail.")
 
     print(f"[*] Passing {len(env_vars)} env var(s) to the Agent Engine runtime: {', '.join(sorted(env_vars))}")
     return env_vars
+
+
+def _find_engine_by_display_name(agent_engines, display_name: str):
+    """Return the newest existing engine with this display name, or None."""
+    matches = [e for e in agent_engines.list() if e.display_name == display_name]
+    if not matches:
+        return None
+    matches.sort(key=lambda e: str(getattr(e, "create_time", "")), reverse=True)
+    if len(matches) > 1:
+        print(
+            f"[!] {len(matches)} engines share the display name '{display_name}'. "
+            f"Updating the newest; the older ones are orphans and can be deleted."
+        )
+    return matches[0]
 
 
 def deploy_to_agent_engine(
@@ -73,10 +92,17 @@ def deploy_to_agent_engine(
     try:
         import vertexai
         from vertexai import agent_engines
-        from agent import root_agent
+        from agent.agent import create_agent
     except ImportError as e:
         print(f"[!] Required SDKs not installed. Run: pip install -r requirements.txt\nError: {e}")
         sys.exit(1)
+
+    # Build the agent for the environment it will run in, not the one deploying
+    # it: Agent Engine authenticates with a service account and has no API key,
+    # so the model must be bound to a Vertex client. The deploying machine may
+    # well have GEMINI_API_KEY set, which would otherwise pickle an agent that
+    # tries to reach the Gemini Developer API from inside the container.
+    root_agent = create_agent(use_vertex=True)
 
     vertexai.init(
         project=project_id,
@@ -112,35 +138,59 @@ def deploy_to_agent_engine(
     )
     print(f"[*] Staged agent package for upload: {staging_dir}/agent")
 
+    deploy_kwargs = dict(
+        requirements=[
+            "google-adk>=2.0.0",
+            "google-cloud-aiplatform>=1.70.0",
+            "google-genai>=0.1.0",
+            "google-cloud-firestore>=2.16.0",
+            "pgvector>=0.3.0",
+            "psycopg[binary]>=3.1.18",
+            "pypdf>=4.2.0",
+            "cloudpickle>=3.0.0",
+            "pydantic>=2.7.0",
+            "python-dotenv>=1.0.0",
+            "requests>=2.31.0",
+        ],
+        extra_packages=["agent"],
+        env_vars=_runtime_env_vars(),
+    )
+
+    # Reuse the existing engine when there is one. Creating a fresh engine per
+    # deploy changes the resource name every time, which would leave the
+    # gateway's REASONING_ENGINE_ID pointing at a stale instance and leave the
+    # old engines running.
+    existing = _find_engine_by_display_name(agent_engines, display_name)
+
     previous_cwd = os.getcwd()
     os.chdir(staging_dir)
     try:
-        remote_agent = agent_engines.create(
-            adk_app,
-            display_name=display_name,
-            description=description,
-            requirements=[
-                "google-adk>=2.0.0",
-                "google-cloud-aiplatform>=1.70.0",
-                "google-genai>=0.1.0",
-                "google-cloud-firestore>=2.16.0",
-                "pgvector>=0.3.0",
-                "psycopg[binary]>=3.1.18",
-                "pypdf>=4.2.0",
-                "cloudpickle>=3.0.0",
-                "pydantic>=2.7.0",
-                "python-dotenv>=1.0.0",
-                "requests>=2.31.0",
-            ],
-            extra_packages=["agent"],
-            env_vars=_runtime_env_vars(),
-        )
+        if existing:
+            print(f"[*] Updating existing Agent Engine in place: {existing.resource_name}")
+            remote_agent = agent_engines.update(
+                resource_name=existing.resource_name,
+                agent_engine=adk_app,
+                display_name=display_name,
+                description=description,
+                **deploy_kwargs,
+            )
+            action = "Updated"
+        else:
+            print("[*] No existing engine with that display name; creating a new one.")
+            remote_agent = agent_engines.create(
+                adk_app,
+                display_name=display_name,
+                description=description,
+                **deploy_kwargs,
+            )
+            action = "Created"
     finally:
         os.chdir(previous_cwd)
         shutil.rmtree(staging_dir, ignore_errors=True)
 
-    print("\n[✓] Successfully deployed RAG agent to Vertex AI Agent Engine!")
+    print(f"\n[✓] {action} RAG agent on Vertex AI Agent Engine!")
     print(f"    Resource Name : {remote_agent.resource_name}")
+    print(f"    Engine ID     : {remote_agent.resource_name.split('/')[-1]}")
     print(f"    Display Name  : {display_name}")
     return remote_agent
 

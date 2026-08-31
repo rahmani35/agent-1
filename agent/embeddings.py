@@ -5,7 +5,7 @@ Supports both Google GenAI Client (API Key) and Vertex AI.
 """
 
 import os
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,13 +33,21 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
     # Clean empty or whitespace-only texts to avoid API errors
     cleaned_texts = [t.strip() if t.strip() else " " for t in texts]
 
-    # Attempt 1: google.genai Client with GEMINI_API_KEY
+    # Attempt 1: google.genai Client, by API key where one is configured and by
+    # the ambient service account (Vertex) otherwise - the latter is the case
+    # inside Agent Engine, which has no API key. Both routes return identical
+    # gemini-embedding-001 vectors, so an index built through one is searchable
+    # through the other.
+    last_err: Optional[Exception] = None
     try:
         from google import genai
         from google.genai import types
 
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        if api_key:
+            client = genai.Client(api_key=api_key)
+        else:
+            client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
 
         # Resolve model name: if text-embedding-004 is requested, use gemini-embedding-001
         target_model = EMBEDDING_MODEL_NAME
@@ -87,8 +95,8 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
             embeddings.extend([r.values for r in results])
         return embeddings
     except Exception as vertex_err:
-        pass
+        raise RuntimeError(
+            f"Failed to generate embeddings. GenAI attempt: {last_err}. Vertex attempt: {vertex_err}"
+        ) from vertex_err
 
-    raise RuntimeError(
-        f"Failed to generate embeddings. Gemini Embeddings failed: {last_err}"
-    )
+    raise RuntimeError(f"Failed to generate embeddings. GenAI attempt: {last_err}")

@@ -52,9 +52,19 @@ jobs:
             --bucket ${{ env.STAGING_BUCKET }} \
             --name rag-document-agent
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # No GEMINI_API_KEY: the Agent Engine container authenticates with its
+          # own service account. An API key here would be promoted to
+          # GOOGLE_API_KEY inside the agent and break the session service.
           MODEL_NAME: gemini-3.6-flash
           EMBEDDING_MODEL: gemini-embedding-001
-          VECTOR_BACKEND: firestore
+          # Must match the gateway's backend, or chat answers come from a
+          # different corpus than the one uploads are written to.
+          VECTOR_BACKEND: ${{ vars.VECTOR_BACKEND || 'cloudsql' }}
           FIRESTORE_COLLECTION: document_chunks
           FIRESTORE_DATABASE: "(default)"
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT || '5432' }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_SSLMODE: require

@@ -15,6 +15,7 @@ if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY")
 
 from google.adk.agents import Agent
+from google.adk.models.google_llm import Gemini
 from google.adk.tools import FunctionTool
 
 
@@ -31,6 +32,11 @@ Guidelines:
 """
 
 DEFAULT_MODEL = os.getenv("MODEL_NAME", os.getenv("GEMINI_MODEL", "gemini-3.6-flash"))
+
+# Region serving the chat model on Vertex. The regional endpoints do not all
+# carry every model - europe-west3 has no gemini-3.6-flash - so the model call
+# goes to the global endpoint while the Agent Engine itself stays regional.
+VERTEX_MODEL_LOCATION = os.getenv("VERTEX_MODEL_LOCATION", "global")
 
 
 def search_documents(query: str, top_k: int = 4) -> str:
@@ -83,12 +89,31 @@ def search_documents(query: str, top_k: int = 4) -> str:
 search_tool = FunctionTool(func=search_documents)
 
 
-def create_agent(model_name: Optional[str] = None) -> Agent:
-    """Instantiate and return the configured ADK Document Q&A Agent."""
+def create_agent(model_name: Optional[str] = None, use_vertex: Optional[bool] = None) -> Agent:
+    """Instantiate and return the configured ADK Document Q&A Agent.
+
+    `use_vertex` selects how the model is reached. On Vertex AI Agent Engine the
+    container authenticates with its own service account and there is no API key,
+    so the model is bound to a Vertex client explicitly. In the Cloud Run gateway
+    an API key is present and the plain model name routes to the Gemini Developer
+    API, as before. Defaults to whichever the environment supports.
+    """
     selected_model = model_name or DEFAULT_MODEL
+    if use_vertex is None:
+        use_vertex = not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+
+    model = (
+        Gemini(
+            model=selected_model,
+            client_kwargs={"vertexai": True, "location": VERTEX_MODEL_LOCATION},
+        )
+        if use_vertex
+        else selected_model
+    )
+
     return Agent(
         name="document_rag_assistant",
-        model=selected_model,
+        model=model,
         description="A Document Q&A RAG agent that retrieves knowledge from Cloud SQL pgvector or Firestore Vector Search.",
         instruction=AGENT_INSTRUCTION,
         tools=[search_tool],
