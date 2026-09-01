@@ -3,12 +3,19 @@
 Coordinates document chunking, embedding generation, and vector store persistence.
 """
 
+import time
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from agent.doc_loader import load_pdf_file, load_text_file, DocumentChunk
 from agent.embeddings import get_embeddings, get_embedding
 from agent.vector_store import get_vector_store, VectorStore
 from .config import get_active_backend
+
+# How long a vector store health probe stays good for. /health is unauthenticated
+# and the UI polls it every 10s per open tab, while a probe opens a fresh
+# database connection - without this, idle browser tabs alone generate a steady
+# stream of connections to Cloud SQL.
+HEALTH_CACHE_TTL_SECONDS = 30.0
 
 
 class VectorService:
@@ -16,6 +23,8 @@ class VectorService:
 
     def __init__(self, backend_override: Optional[str] = None):
         self.backend_override = backend_override
+        # backend name -> (monotonic timestamp, probe result)
+        self._health_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
     def _get_store(self) -> VectorStore:
         return get_vector_store(self.backend_override or get_active_backend())
@@ -100,7 +109,20 @@ class VectorService:
             doc_id=doc_id,
         )
 
-    def get_health(self) -> Dict[str, Any]:
-        """Check vector store health."""
-        store = self._get_store()
-        return store.health_check()
+    def get_health(self, max_age_seconds: float = HEALTH_CACHE_TTL_SECONDS) -> Dict[str, Any]:
+        """Check vector store health, reusing a recent probe when there is one.
+
+        Pass max_age_seconds=0 to force a fresh probe - callers that just changed
+        the backend need to see the new one, not the previous answer.
+        """
+        backend = self.backend_override or get_active_backend()
+        now = time.monotonic()
+
+        cached = self._health_cache.get(backend)
+        if cached and (now - cached[0]) < max_age_seconds:
+            timestamp, result = cached
+            return {**result, "cached": True, "checked_seconds_ago": round(now - timestamp, 1)}
+
+        result = self._get_store().health_check()
+        self._health_cache[backend] = (now, result)
+        return {**result, "cached": False, "checked_seconds_ago": 0.0}

@@ -185,7 +185,9 @@ async def switch_backend(
 ):
     """Dynamically switch active vector backend ('firestore' or 'cloudsql')."""
     new_backend = set_active_backend(request.backend)
-    health = vector_service.get_health()
+    # Force a fresh probe: the caller is asking about the backend they just
+    # switched to, so a cached result would describe the previous one.
+    health = vector_service.get_health(max_age_seconds=0)
     return {
         "message": f"Switched active vector backend to '{new_backend}'.",
         "active_backend": new_backend,
