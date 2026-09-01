@@ -3,14 +3,27 @@ import { GoogleLogin } from '@react-oauth/google';
 import { ShieldCheck, AlertCircle, Database, FileText, Search } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginView() {
+const FEATURES = [
+  { Icon: FileText, label: 'Smart Chunking' },
+  { Icon: Search, label: 'Vector Search' },
+  { Icon: ShieldCheck, label: 'OAuth Whitelist' },
+];
+
+export default function LoginView({ agentStatus }) {
   const { loginWithGoogle, sessionExpired } = useAuth();
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // The health poll already knows the gateway is down. Saying so here beats
+  // letting the user click through to a failed sign-in to find out.
+  const isOffline = agentStatus != null && agentStatus.status !== 'ok';
+
   // Explain an involuntary return to this screen, rather than showing the plain
   // sign-in page as though the user had logged out on purpose.
-  const notice = error || (sessionExpired ? 'Your session has expired. Please sign in again.' : null);
+  const notice =
+    error ||
+    (sessionExpired ? 'Your session has expired. Please sign in again.' : null) ||
+    (isOffline ? 'The gateway is not responding, so signing in will fail. Start the backend, then use the refresh button in the header.' : null);
 
   const handleSuccess = async (credentialResponse) => {
     try {
@@ -32,54 +45,49 @@ export default function LoginView() {
   const buildSha = typeof __BUILD_SHA__ !== 'undefined' ? __BUILD_SHA__ : 'dev';
 
   return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 0' }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem 0', overflowY: 'auto' }}>
       <div className="panel-card" style={{ maxWidth: '460px', width: '100%', textAlign: 'center' }}>
         <div
           style={{
             width: '56px',
             height: '56px',
-            borderRadius: '14px',
-            background: 'linear-gradient(135deg, var(--accent-blue), var(--accent-purple))',
-            color: 'white',
+            borderRadius: 'var(--radius-lg)',
+            backgroundColor: 'var(--accent-blue)',
+            boxShadow: 'var(--inset-highlight)',
+            color: '#fff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 1.25rem',
-            boxShadow: '0 4px 16px rgba(88, 166, 255, 0.4)',
           }}
         >
-          <Database size={28} />
+          <Database size={28} aria-hidden="true" />
         </div>
 
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.5rem' }}>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.5rem', letterSpacing: '-0.02em' }}>
           Document Q&amp;A Agent
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
           Upload PDF, TXT, and Markdown files and ask grounded questions powered by Cloud SQL (pgvector) &amp; Firestore Vector Search.
         </p>
 
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '1.25rem', marginBottom: '1.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <FileText size={14} color="var(--accent-blue)" />
-            <span>Smart Chunking</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <Search size={14} color="var(--accent-purple)" />
-            <span>Vector Search</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <ShieldCheck size={14} color="var(--accent-green)" />
-            <span>OAuth Whitelist</span>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '1.25rem', marginBottom: '1.75rem', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+          {FEATURES.map(({ Icon, label }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Icon size={14} aria-hidden="true" color="var(--text-muted)" />
+              <span>{label}</span>
+            </div>
+          ))}
         </div>
 
         {notice && (
           <div
+            role="alert"
             style={{
               padding: '0.75rem 1rem',
-              backgroundColor: error ? 'rgba(248, 81, 73, 0.12)' : 'rgba(210, 153, 34, 0.12)',
-              border: error ? '1px solid rgba(248, 81, 73, 0.3)' : '1px solid rgba(210, 153, 34, 0.35)',
-              color: error ? 'var(--accent-red)' : 'var(--accent-amber, #d29922)',
+              backgroundColor: error ? 'var(--accent-red-wash)' : 'rgba(210, 153, 34, 0.12)',
+              border: `1px solid ${error ? 'var(--accent-red-edge)' : 'rgba(210, 153, 34, 0.35)'}`,
+              color: error ? 'var(--accent-red)' : 'var(--accent-amber)',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.85rem',
               display: 'flex',
@@ -89,7 +97,7 @@ export default function LoginView() {
               textAlign: 'left',
             }}
           >
-            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <AlertCircle size={18} aria-hidden="true" style={{ flexShrink: 0 }} />
             <span>{notice}</span>
           </div>
         )}

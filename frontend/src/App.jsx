@@ -55,7 +55,7 @@ function MainApp() {
       />
 
       {!isAuthenticated ? (
-        <LoginView />
+        <LoginView agentStatus={agentStatus} />
       ) : (
         <>
           <nav className="nav-tabs">

@@ -8,18 +8,37 @@ import {
   AlertCircle,
   RefreshCw,
   HardDrive,
+  FileQuestion,
 } from 'lucide-react';
 import { uploadDocument, fetchDocuments, deleteDocument, searchDocuments } from '../services/api';
 import DriveBrowserModal from './DriveBrowserModal';
+import ConfirmDialog from './ConfirmDialog';
+
+function SkeletonRows({ count = 3 }) {
+  return (
+    <div style={{ marginTop: '0.75rem' }} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div className="skeleton-row" key={i}>
+          <div className="skeleton" style={{ width: `${72 - i * 12}%` }} />
+          <div className="skeleton" style={{ width: '70%' }} />
+          <div className="skeleton" style={{ width: '55%' }} />
+          <div className="skeleton" style={{ width: '16px' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function DocumentUploadView({ activeBackend }) {
   const [documents, setDocuments] = useState([]);
-  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [error, setError] = useState(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Settings
   const [chunkSize, setChunkSize] = useState(800);
@@ -28,6 +47,7 @@ export default function DocumentUploadView({ activeBackend }) {
   // Test Search Box
   const [testQuery, setTestQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [searchError, setSearchError] = useState(null);
   const [searching, setSearching] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -57,7 +77,7 @@ export default function DocumentUploadView({ activeBackend }) {
       const res = await uploadDocument(file, chunkSize, chunkOverlap);
       setUploadStatus({
         type: 'success',
-        message: `Indexed "${file.name}" into ${res.chunk_count} vector chunks!`,
+        message: `Indexed "${file.name}" into ${res.chunk_count} vector chunks.`,
       });
       loadDocs();
     } catch (err) {
@@ -75,13 +95,19 @@ export default function DocumentUploadView({ activeBackend }) {
     }
   };
 
-  const handleDelete = async (docId, filename) => {
-    if (!window.confirm(`Delete document "${filename}" and its vector embeddings?`)) return;
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
     try {
-      await deleteDocument(docId);
+      setDeleting(true);
+      setError(null);
+      await deleteDocument(pendingDelete.doc_id);
+      setPendingDelete(null);
       loadDocs();
     } catch (err) {
-      alert(`Delete failed: ${err.message}`);
+      setPendingDelete(null);
+      setError(`Could not delete "${pendingDelete.filename}": ${err.message}`);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -90,18 +116,22 @@ export default function DocumentUploadView({ activeBackend }) {
     if (!testQuery.trim()) return;
     try {
       setSearching(true);
+      setSearchError(null);
       const res = await searchDocuments({ query: testQuery, topK: 3 });
       setSearchResults(res.results || []);
     } catch (err) {
-      alert(`Search failed: ${err.message}`);
+      // Reported in the results pane, where the user is already looking.
+      setSearchError(err.message || 'Vector search failed. Check that the store is reachable.');
+      setSearchResults(null);
     } finally {
       setSearching(false);
     }
   };
 
+  const openFilePicker = () => fileInputRef.current?.click();
+
   return (
     <div className="upload-view-container">
-      {/* Google Drive Visual Browser Modal */}
       <DriveBrowserModal
         isOpen={isDriveModalOpen}
         onClose={() => setIsDriveModalOpen(false)}
@@ -109,76 +139,73 @@ export default function DocumentUploadView({ activeBackend }) {
           loadDocs();
           setUploadStatus({
             type: 'success',
-            message: 'Google Drive folder synchronized and vectorized successfully!',
+            message: 'Google Drive folder synchronized and vectorized.',
           });
         }}
       />
 
+      <ConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        busy={deleting}
+        title={`Delete "${pendingDelete?.filename}"?`}
+        body="This removes the document and every vector embedding generated from it. The agent will no longer be able to cite it. This cannot be undone."
+        confirmLabel="Delete document"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+
       {/* Left Column: Upload & Indexed Documents */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        {/* Upload & Drive Actions Box */}
         <div className="panel-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <UploadCloud size={18} color="var(--accent-blue)" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <h3 className="panel-heading">
+              <UploadCloud size={18} aria-hidden="true" color="var(--text-secondary)" />
               <span>Add Documents</span>
             </h3>
 
-            {/* Browse Google Drive Button */}
-            <button
-              onClick={() => setIsDriveModalOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                padding: '0.45rem 0.85rem',
-                borderRadius: 'var(--radius-sm)',
-                backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                color: 'var(--accent-blue)',
-                fontSize: '0.825rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              <HardDrive size={15} />
+            <button type="button" className="btn-secondary" onClick={() => setIsDriveModalOpen(true)}>
+              <HardDrive size={15} aria-hidden="true" />
               <span>Browse Google Drive</span>
             </button>
           </div>
 
-          <div
+          <button
+            type="button"
             className={`dropzone ${isDragActive ? 'drag-active' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
             onDragLeave={() => setIsDragActive(false)}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={openFilePicker}
+            disabled={uploading}
           >
-            <input
-              type="file"
-              ref={fileInputRef}
-              style={{ display: 'none' }}
-              accept=".pdf,.txt,.md,.markdown,.json,.csv"
-              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
-            />
-            <UploadCloud size={32} color="var(--accent-blue)" />
+            <UploadCloud size={32} color="var(--accent-blue)" aria-hidden="true" />
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.925rem' }}>
-                {uploading ? 'Processing & Generating Embeddings...' : 'Drop local files here or click to browse'}
+                {uploading ? 'Processing and generating embeddings...' : 'Drop local files here or click to browse'}
               </div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                 Supports PDF, Markdown (.md), and TXT files
               </div>
             </div>
             {uploading && <div className="spinner" style={{ width: '24px', height: '24px' }} />}
-          </div>
+          </button>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            accept=".pdf,.txt,.md,.markdown,.json,.csv"
+            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])}
+          />
 
           {/* Chunking Settings */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '1rem' }}>
-            <div>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label htmlFor="chunk-size" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 Chunk Size (chars)
               </label>
               <input
+                id="chunk-size"
                 type="number"
                 min={100}
                 max={4000}
@@ -188,11 +215,12 @@ export default function DocumentUploadView({ activeBackend }) {
                 style={{ width: '100%', padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
               />
             </div>
-            <div>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <label htmlFor="chunk-overlap" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 Chunk Overlap (chars)
               </label>
               <input
+                id="chunk-overlap"
                 type="number"
                 min={0}
                 max={Math.max(0, chunkSize - 1)}
@@ -205,52 +233,57 @@ export default function DocumentUploadView({ activeBackend }) {
           </div>
 
           {uploadStatus && (
-            <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', backgroundColor: 'rgba(63, 185, 80, 0.12)', border: '1px solid rgba(63, 185, 80, 0.3)', color: 'var(--accent-green)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <CheckCircle2 size={16} />
-              <span>{uploadStatus.message}</span>
+            <div className="banner is-success" style={{ marginTop: '0.75rem' }}>
+              <CheckCircle2 size={16} aria-hidden="true" />
+              <span className="banner-body">{uploadStatus.message}</span>
             </div>
           )}
 
           {error && (
-            <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.85rem', backgroundColor: 'rgba(248, 81, 73, 0.12)', border: '1px solid rgba(248, 81, 73, 0.3)', color: 'var(--accent-red)', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <AlertCircle size={16} />
-              <span>{error}</span>
+            <div className="banner is-error" style={{ marginTop: '0.75rem' }} role="alert">
+              <AlertCircle size={16} aria-hidden="true" />
+              <span className="banner-body">{error}</span>
             </div>
           )}
         </div>
 
         {/* Document List */}
         <div className="panel-card" style={{ flex: 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <FileText size={18} color="var(--accent-purple)" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+            <h3 className="panel-heading">
+              <FileText size={18} aria-hidden="true" color="var(--text-secondary)" />
               <span>Indexed Documents ({documents.length})</span>
-              <span
-                style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  padding: '0.2rem 0.5rem',
-                  borderRadius: '999px',
-                  backgroundColor: activeBackend === 'cloudsql' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                  color: activeBackend === 'cloudsql' ? 'var(--accent-blue)' : 'var(--accent-emerald)',
-                  border: `1px solid ${activeBackend === 'cloudsql' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-                }}
-              >
-                {activeBackend === 'cloudsql' ? 'PostgreSQL pgvector' : 'Cloud Firestore'}
-              </span>
             </h3>
-            <button className="btn-icon" onClick={loadDocs} title="Refresh documents" style={{ width: '30px', height: '30px' }}>
-              <RefreshCw size={14} />
+            <button
+              className="btn-icon"
+              onClick={loadDocs}
+              title="Refresh documents"
+              aria-label="Refresh documents"
+              style={{ width: '30px', height: '30px' }}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
             </button>
           </div>
 
           {loadingDocs ? (
-            <div style={{ padding: '2rem', display: 'flex', justifyContent: 'center' }}>
-              <div className="spinner" style={{ width: '28px', height: '28px' }} />
-            </div>
+            <SkeletonRows />
           ) : documents.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              No documents indexed yet. Upload a local file or browse Google Drive above to start.
+            <div className="empty-state">
+              <FileQuestion size={30} className="empty-state-icon" aria-hidden="true" />
+              <div className="empty-state-title">No documents indexed yet</div>
+              <div style={{ maxWidth: '38ch' }}>
+                Add a file and the agent can start answering questions from it with citations.
+              </div>
+              <div className="empty-state-actions">
+                <button type="button" className="btn-primary" onClick={openFilePicker}>
+                  <UploadCloud size={15} aria-hidden="true" />
+                  <span>Upload a file</span>
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => setIsDriveModalOpen(true)}>
+                  <HardDrive size={15} aria-hidden="true" />
+                  <span>Browse Google Drive</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -270,57 +303,53 @@ export default function DocumentUploadView({ activeBackend }) {
                       <tr key={doc.doc_id}>
                         <td style={{ fontWeight: 500 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <FileText size={14} color={isGDrive ? 'var(--accent-emerald)' : 'var(--accent-blue)'} />
+                            <FileText size={14} aria-hidden="true" color="var(--text-muted)" />
                             <span title={doc.filename}>{doc.filename}</span>
                           </div>
                         </td>
                         <td>
-                          {isGDrive ? (
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.25rem',
-                                padding: '0.15rem 0.45rem',
-                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                border: '1px solid rgba(16, 185, 129, 0.3)',
-                                color: 'var(--accent-emerald)',
-                                borderRadius: '4px',
-                                fontSize: '0.7rem',
-                                fontWeight: 600,
-                              }}
-                            >
-                              <HardDrive size={10} />
-                              <span>Google Drive</span>
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                padding: '0.15rem 0.45rem',
-                                backgroundColor: 'var(--bg-app)',
-                                border: '1px solid var(--border-subtle)',
-                                color: 'var(--text-muted)',
-                                borderRadius: '4px',
-                                fontSize: '0.7rem',
-                              }}
-                            >
-                              Upload
-                            </span>
-                          )}
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.15rem 0.45rem',
+                              backgroundColor: 'var(--bg-app)',
+                              border: '1px solid var(--border-subtle)',
+                              color: 'var(--text-secondary)',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: 500,
+                            }}
+                          >
+                            {isGDrive && <HardDrive size={10} aria-hidden="true" />}
+                            <span>{isGDrive ? 'Google Drive' : 'Upload'}</span>
+                          </span>
                         </td>
                         <td>
-                          <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', borderRadius: '4px', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
+                          <span
+                            style={{
+                              padding: '0.15rem 0.45rem',
+                              backgroundColor: 'var(--bg-app)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              fontFamily: 'var(--font-mono)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
                             {doc.chunk_count}
                           </span>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <button
-                            className="btn-icon"
-                            onClick={() => handleDelete(doc.doc_id, doc.filename)}
-                            title="Delete document and vector chunks"
-                            style={{ width: '28px', height: '28px', color: 'var(--accent-red)', marginLeft: 'auto' }}
+                            className="btn-icon is-danger"
+                            onClick={() => setPendingDelete(doc)}
+                            title={`Delete ${doc.filename}`}
+                            aria-label={`Delete ${doc.filename}`}
+                            style={{ width: '28px', height: '28px', marginLeft: 'auto' }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={13} aria-hidden="true" />
                           </button>
                         </td>
                       </tr>
@@ -334,13 +363,13 @@ export default function DocumentUploadView({ activeBackend }) {
       </div>
 
       {/* Right Column: Direct Vector Search Sandbox */}
-      <div className="panel-card" style={{ display: 'flex', flexDirection: 'column' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Search size={18} color="var(--accent-green)" />
+      <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <h3 className="panel-heading" style={{ marginBottom: '0.5rem' }}>
+          <Search size={18} aria-hidden="true" color="var(--text-secondary)" />
           <span>Vector Search Sandbox</span>
         </h3>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-          Directly test cosine similarity retrieval against your active vector database chunks.
+          Test cosine similarity retrieval directly against the active vector store.
         </p>
 
         <form onSubmit={handleTestSearch} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -348,40 +377,63 @@ export default function DocumentUploadView({ activeBackend }) {
             type="text"
             className="chat-input"
             placeholder="Enter query to test vector similarity..."
+            aria-label="Vector similarity test query"
             value={testQuery}
             onChange={(e) => setTestQuery(e.target.value)}
           />
           <button type="submit" className="btn-primary" disabled={searching || !testQuery.trim()}>
-            {searching ? <div className="spinner" style={{ width: '16px', height: '16px' }} /> : <Search size={16} />}
+            {searching ? <div className="spinner" style={{ width: '16px', height: '16px' }} /> : <Search size={16} aria-hidden="true" />}
             <span>Search</span>
           </button>
         </form>
 
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {searchResults === null ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              Run a test query above to preview vector retrieval chunks and similarity scores.
+          {searchError ? (
+            <div className="banner is-error" role="alert">
+              <AlertCircle size={16} aria-hidden="true" />
+              <span className="banner-body">{searchError}</span>
+            </div>
+          ) : searchResults === null ? (
+            <div className="empty-state">
+              <Search size={26} className="empty-state-icon" aria-hidden="true" />
+              <div className="empty-state-title">No query run yet</div>
+              <div style={{ maxWidth: '36ch' }}>
+                Search above to preview the chunks the agent would retrieve, and how closely each one matches.
+              </div>
             </div>
           ) : searchResults.length === 0 ? (
-            <div style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              No matching chunks found for query.
+            <div className="empty-state">
+              <FileQuestion size={26} className="empty-state-icon" aria-hidden="true" />
+              <div className="empty-state-title">No matching chunks</div>
+              <div style={{ maxWidth: '36ch' }}>
+                Nothing in the store was close enough to this query. Try different wording, or index more documents.
+              </div>
             </div>
           ) : (
-            searchResults.map((chunk, idx) => (
-              <div key={chunk.id || idx} className="citation-box">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--accent-blue)' }}>
-                    {chunk.filename} (Chunk #{chunk.chunk_index})
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>
-                    Score: {(chunk.score * 100).toFixed(1)}%
-                  </span>
+            searchResults.map((chunk, idx) => {
+              const pct = Math.max(0, Math.min(100, Math.round((chunk.score || 0) * 100)));
+              return (
+                <div key={chunk.id || idx} className="citation-box">
+                  <div className="citation-head">
+                    <span className="citation-source">
+                      {chunk.filename} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>chunk #{chunk.chunk_index}</span>
+                    </span>
+                    <span className="citation-score">{(chunk.score * 100).toFixed(1)}%</span>
+                  </div>
+                  <div
+                    className="score-track"
+                    role="meter"
+                    aria-valuenow={pct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Similarity score for chunk ${chunk.chunk_index}`}
+                  >
+                    <div className="score-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="citation-text">{chunk.content}</div>
                 </div>
-                <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                  {chunk.content}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
