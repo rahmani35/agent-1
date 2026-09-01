@@ -30,7 +30,11 @@ def _runtime_env_vars() -> dict:
     Agent Engine injects them and rejects the deployment with
     "Environment variable name '...' is reserved" if they are set here.
     """
-    env_vars = {}
+    # Tracing is requested via AdkApp(enable_tracing=True), but the collection
+    # flag rides on this env var. The SDK appends it only when creating an
+    # engine; an update replaces the env list wholesale and silently drops it,
+    # leaving tracing off. Set it explicitly so it survives every deploy.
+    env_vars = {"GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true"}
 
     # GEMINI_API_KEY is deliberately absent. Setting it makes agent.py promote it
     # to GOOGLE_API_KEY, which switches google-genai to API-key auth for every
