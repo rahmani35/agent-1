@@ -110,6 +110,11 @@ class GoogleDriveService:
             "folders": folders,
             "supported_files": supported_files,
             "total_files": len(all_files),
+            # Which Drive was actually read. Without a user token this falls back
+            # to application default credentials, whose Drive is a different
+            # (usually empty) account - an empty listing then looks like an empty
+            # Drive rather than a missing authorization.
+            "credential_source": "user" if drive_token else "application-default",
         }
 
     def _download_or_export_file(self, drive_file: Dict[str, Any], drive_token: Optional[str] = None) -> tuple[bytes, str]:

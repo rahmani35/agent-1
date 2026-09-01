@@ -75,6 +75,21 @@ export default function DriveBrowserModal({ isOpen, onClose, onSyncComplete }) {
 
   const loadFolder = async (folderId, tokenToUse = null) => {
     const activeToken = tokenToUse !== null ? tokenToUse : driveToken;
+
+    // Without a Drive token the gateway falls back to its own service account,
+    // whose Drive is empty - the browser then shows a successful listing of
+    // zero folders and zero files, which reads as "your Drive is empty" rather
+    // than "you have not granted access yet". Ask for consent instead.
+    if (!activeToken) {
+      setNeedsAuth(true);
+      setFolders([]);
+      setSupportedFiles([]);
+      setCurrentParentId(folderId);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -112,7 +127,18 @@ export default function DriveBrowserModal({ isOpen, onClose, onSyncComplete }) {
     loadFolder(target.id);
   };
 
+  // Syncing without a Drive token is worse than browsing without one: the
+  // gateway would list the service account's empty Drive and then purge the
+  // folder's documents as "removed from Drive".
+  const requireDriveToken = () => {
+    if (driveToken) return true;
+    setNeedsAuth(true);
+    setError('Grant Google Drive access before vectorizing a folder.');
+    return false;
+  };
+
   const handleSyncCurrentFolder = async () => {
+    if (!requireDriveToken()) return;
     const currentFolder = breadcrumbs[breadcrumbs.length - 1];
     try {
       setSyncing(true);
@@ -141,6 +167,7 @@ export default function DriveBrowserModal({ isOpen, onClose, onSyncComplete }) {
       setError('Please enter a valid Google Drive Folder ID or URL.');
       return;
     }
+    if (!requireDriveToken()) return;
 
     try {
       setSyncing(true);
