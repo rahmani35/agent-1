@@ -24,6 +24,27 @@ export function clearStoredSession() {
 }
 
 /**
+ * fetch(), with the browser's network failure translated into something a user
+ * can act on.
+ *
+ * When the gateway is not running, fetch rejects with a bare
+ * "TypeError: Failed to fetch", which every caller here surfaced verbatim - a
+ * message that names neither the cause nor the fix.
+ */
+async function request(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+      throw new Error(`The gateway at ${BASE_URL} did not respond in time.`);
+    }
+    throw new Error(
+      `Cannot reach the gateway at ${BASE_URL}. Check that the backend is running, then try again.`
+    );
+  }
+}
+
+/**
  * Unwrap a response, treating 401 as the end of the session.
  *
  * A Google ID token is only valid for about an hour. The app used to validate
@@ -48,7 +69,7 @@ async function unwrap(res, fallbackMessage, { endSessionOn401 = true } = {}) {
 }
 
 export async function authenticateGoogleToken(idToken) {
-  const res = await fetch(`${BASE_URL}/auth/google`, {
+  const res = await request(`${BASE_URL}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id_token: idToken }),
@@ -96,7 +117,7 @@ export async function uploadDocument(file, chunkSize = 800, chunkOverlap = 150) 
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(
+  const res = await request(
     `${BASE_URL}/documents/upload?chunk_size=${chunkSize}&chunk_overlap=${chunkOverlap}`,
     {
       method: 'POST',
@@ -109,7 +130,7 @@ export async function uploadDocument(file, chunkSize = 800, chunkOverlap = 150) 
 }
 
 export async function fetchDocuments() {
-  const res = await fetch(`${BASE_URL}/documents`, {
+  const res = await request(`${BASE_URL}/documents`, {
     headers: getAuthHeaders(),
   });
 
@@ -117,7 +138,7 @@ export async function fetchDocuments() {
 }
 
 export async function deleteDocument(docId) {
-  const res = await fetch(`${BASE_URL}/documents/${docId}`, {
+  const res = await request(`${BASE_URL}/documents/${docId}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
@@ -126,7 +147,7 @@ export async function deleteDocument(docId) {
 }
 
 export async function searchDocuments({ query, topK = 5, docId = null }) {
-  const res = await fetch(`${BASE_URL}/documents/search`, {
+  const res = await request(`${BASE_URL}/documents/search`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({ query, top_k: topK, doc_id: docId }),
@@ -136,7 +157,7 @@ export async function searchDocuments({ query, topK = 5, docId = null }) {
 }
 
 export async function sendChatMessage({ message, sessionId }) {
-  const res = await fetch(`${BASE_URL}/chat`, {
+  const res = await request(`${BASE_URL}/chat`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({ message, session_id: sessionId }),
@@ -150,7 +171,7 @@ export async function browseDriveFolders(parentId = 'root', driveToken = null) {
   if (driveToken) {
     headers['X-Drive-Token'] = driveToken;
   }
-  const res = await fetch(`${BASE_URL}/drive/browse?parent_id=${encodeURIComponent(parentId)}`, {
+  const res = await request(`${BASE_URL}/drive/browse?parent_id=${encodeURIComponent(parentId)}`, {
     headers,
   });
 
@@ -162,7 +183,7 @@ export async function syncDriveFolder({ folderId, folderName = '', chunkSize = 8
   if (driveToken) {
     headers['X-Drive-Token'] = driveToken;
   }
-  const res = await fetch(`${BASE_URL}/drive/sync`, {
+  const res = await request(`${BASE_URL}/drive/sync`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -178,7 +199,7 @@ export async function syncDriveFolder({ folderId, folderName = '', chunkSize = 8
 }
 
 export async function switchVectorBackend(backend) {
-  const res = await fetch(`${BASE_URL}/settings/backend`, {
+  const res = await request(`${BASE_URL}/settings/backend`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: JSON.stringify({ backend }),
@@ -188,7 +209,7 @@ export async function switchVectorBackend(backend) {
 }
 
 export async function fetchBackendSetting() {
-  const res = await fetch(`${BASE_URL}/settings/backend`, {
+  const res = await request(`${BASE_URL}/settings/backend`, {
     headers: getAuthHeaders(),
   });
 

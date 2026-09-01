@@ -1,6 +1,6 @@
 :root {
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Dark Theme (Default) */
   --bg-app: #0d1117;
@@ -13,19 +13,34 @@
   --text-secondary: #8b949e;
   --text-muted: #6e7681;
 
+  /* One accent for interactive affordances. */
   --accent-blue: #58a6ff;
-  --accent-purple: #a371f7;
+  --accent-wash: rgba(88, 166, 255, 0.12);
+  --accent-edge: rgba(88, 166, 255, 0.32);
+
+  /* Semantic state colours - reserved for outcomes, never for decoration. */
   --accent-green: #3fb950;
-  --accent-orange: #d29922;
+  --accent-green-wash: rgba(63, 185, 80, 0.12);
+  --accent-green-edge: rgba(63, 185, 80, 0.3);
+  --accent-amber: #d29922;
   --accent-red: #f85149;
+  --accent-red-wash: rgba(248, 81, 73, 0.12);
+  --accent-red-edge: rgba(248, 81, 73, 0.3);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
+  /* A hairline highlight along the top edge, in place of a coloured glow. */
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
+
+  /* Systemic layers. Nothing sets a bare z-index outside this scale. */
+  --z-dropdown: 40;
+  --z-modal: 100;
 }
 
 [data-theme="light"] {
@@ -40,14 +55,22 @@
   --text-muted: #8c959f;
 
   --accent-blue: #0969da;
-  --accent-purple: #8250df;
+  --accent-wash: rgba(9, 105, 218, 0.08);
+  --accent-edge: rgba(9, 105, 218, 0.25);
+
   --accent-green: #1a7f37;
-  --accent-orange: #9a6700;
+  --accent-green-wash: rgba(26, 127, 55, 0.1);
+  --accent-green-edge: rgba(26, 127, 55, 0.25);
+  --accent-amber: #9a6700;
   --accent-red: #cf222e;
+  --accent-red-wash: rgba(207, 34, 46, 0.08);
+  --accent-red-edge: rgba(207, 34, 46, 0.25);
 
   --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.04);
   --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.08);
   --shadow-lg: 0 8px 24px rgba(31, 35, 40, 0.12);
+
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 * {
@@ -63,7 +86,12 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* The Drive modal locks the page behind it. */
+body.is-modal-open {
+  overflow: hidden;
 }
 
 button {
@@ -85,4 +113,36 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+/*
+ * Keyboard focus. The button reset above strips every default affordance, so
+ * without this the app is reachable by tab but gives no sign of where you are.
+ */
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.chat-input:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* The spinner still needs to spin - just slowly enough not to provoke. */
+  .spinner {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
