@@ -4,9 +4,13 @@ import { ShieldCheck, AlertCircle, Database, FileText, Search } from 'lucide-rea
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginView() {
-  const { loginWithGoogle } = useAuth();
+  const { loginWithGoogle, sessionExpired } = useAuth();
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Explain an involuntary return to this screen, rather than showing the plain
+  // sign-in page as though the user had logged out on purpose.
+  const notice = error || (sessionExpired ? 'Your session has expired. Please sign in again.' : null);
 
   const handleSuccess = async (credentialResponse) => {
     try {
@@ -69,13 +73,13 @@ export default function LoginView() {
           </div>
         </div>
 
-        {error && (
+        {notice && (
           <div
             style={{
               padding: '0.75rem 1rem',
-              backgroundColor: 'rgba(248, 81, 73, 0.12)',
-              border: '1px solid rgba(248, 81, 73, 0.3)',
-              color: 'var(--accent-red)',
+              backgroundColor: error ? 'rgba(248, 81, 73, 0.12)' : 'rgba(210, 153, 34, 0.12)',
+              border: error ? '1px solid rgba(248, 81, 73, 0.3)' : '1px solid rgba(210, 153, 34, 0.35)',
+              color: error ? 'var(--accent-red)' : 'var(--accent-amber, #d29922)',
               borderRadius: 'var(--radius-sm)',
               fontSize: '0.85rem',
               display: 'flex',
@@ -86,7 +90,7 @@ export default function LoginView() {
             }}
           >
             <AlertCircle size={18} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
+            <span>{notice}</span>
           </div>
         )}
 

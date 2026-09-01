@@ -64,9 +64,17 @@ def verify_google_id_token(token_str: str) -> UserProfile:
     except HTTPException:
         raise
     except ValueError as e:
+        # google-auth reports expiry as a raw clock comparison
+        # ("Token expired, 1788301578 < 1788302347"), which reaches the browser
+        # verbatim. Say what happened instead of leaking timestamps.
+        expired = "expired" in str(e).lower()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid Google ID Token: {str(e)}",
+            detail=(
+                "Your session has expired. Please sign in again."
+                if expired
+                else "Invalid Google sign-in token."
+            ),
         ) from e
     except Exception as e:
         raise HTTPException(

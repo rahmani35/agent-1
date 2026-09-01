@@ -4,6 +4,8 @@
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8084';
 
+export const SESSION_EXPIRED_EVENT = 'agent1:session-expired';
+
 function getAuthHeaders(isMultipart = false) {
   const token = localStorage.getItem('agent1_google_token');
   const headers = {};
@@ -16,6 +18,35 @@ function getAuthHeaders(isMultipart = false) {
   return headers;
 }
 
+export function clearStoredSession() {
+  localStorage.removeItem('agent1_google_token');
+  localStorage.removeItem('agent1_user');
+}
+
+/**
+ * Unwrap a response, treating 401 as the end of the session.
+ *
+ * A Google ID token is only valid for about an hour. The app used to validate
+ * it once at startup, so when it lapsed mid-session every action failed with a
+ * raw token error while the UI still looked signed in. Dropping the dead
+ * credentials and announcing it sends the user back to the sign-in screen.
+ */
+async function unwrap(res, fallbackMessage, { endSessionOn401 = true } = {}) {
+  if (res.ok) {
+    return res.json();
+  }
+
+  const errorData = await res.json().catch(() => ({}));
+
+  if (res.status === 401 && endSessionOn401) {
+    clearStoredSession();
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    throw new Error('Your session has expired. Please sign in again.');
+  }
+
+  throw new Error(errorData.detail || `${fallbackMessage} (${res.status})`);
+}
+
 export async function authenticateGoogleToken(idToken) {
   const res = await fetch(`${BASE_URL}/auth/google`, {
     method: 'POST',
@@ -23,12 +54,9 @@ export async function authenticateGoogleToken(idToken) {
     body: JSON.stringify({ id_token: idToken }),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Google authentication failed.');
-  }
-
-  return await res.json();
+  // Signing in is the one call where a 401 is not an expiring session: there is
+  // no session yet, and reporting one would hide why the sign-in was rejected.
+  return unwrap(res, 'Google authentication failed.', { endSessionOn401: false });
 }
 
 export async function fetchUserProfile() {
@@ -43,8 +71,7 @@ export async function fetchUserProfile() {
 
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
-        localStorage.removeItem('agent1_google_token');
-        localStorage.removeItem('agent1_user');
+        clearStoredSession();
       }
       return null;
     }
@@ -78,12 +105,7 @@ export async function uploadDocument(file, chunkSize = 800, chunkOverlap = 150) 
     }
   );
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Upload failed (${res.status})`);
-  }
-
-  return await res.json();
+  return unwrap(res, 'Upload failed');
 }
 
 export async function fetchDocuments() {
@@ -91,12 +113,7 @@ export async function fetchDocuments() {
     headers: getAuthHeaders(),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Failed to fetch documents.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Failed to fetch documents.');
 }
 
 export async function deleteDocument(docId) {
@@ -105,12 +122,7 @@ export async function deleteDocument(docId) {
     headers: getAuthHeaders(),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Failed to delete document.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Failed to delete document.');
 }
 
 export async function searchDocuments({ query, topK = 5, docId = null }) {
@@ -120,12 +132,7 @@ export async function searchDocuments({ query, topK = 5, docId = null }) {
     body: JSON.stringify({ query, top_k: topK, doc_id: docId }),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Vector search failed.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Vector search failed.');
 }
 
 export async function sendChatMessage({ message, sessionId }) {
@@ -135,12 +142,7 @@ export async function sendChatMessage({ message, sessionId }) {
     body: JSON.stringify({ message, session_id: sessionId }),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Agent reasoning error (${res.status})`);
-  }
-
-  return await res.json();
+  return unwrap(res, 'Agent reasoning error');
 }
 
 export async function browseDriveFolders(parentId = 'root', driveToken = null) {
@@ -152,12 +154,7 @@ export async function browseDriveFolders(parentId = 'root', driveToken = null) {
     headers,
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Failed to browse Google Drive folders.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Failed to browse Google Drive folders.');
 }
 
 export async function syncDriveFolder({ folderId, folderName = '', chunkSize = 800, chunkOverlap = 150, driveToken = null }) {
@@ -177,12 +174,7 @@ export async function syncDriveFolder({ folderId, folderName = '', chunkSize = 8
     }),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Google Drive folder sync failed.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Google Drive folder sync failed.');
 }
 
 export async function switchVectorBackend(backend) {
@@ -192,12 +184,7 @@ export async function switchVectorBackend(backend) {
     body: JSON.stringify({ backend }),
   });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.detail || 'Failed to switch vector backend.');
-  }
-
-  return await res.json();
+  return unwrap(res, 'Failed to switch vector backend.');
 }
 
 export async function fetchBackendSetting() {
